@@ -4,16 +4,18 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.net.ServerSocket;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Server {
+    private ConcurrentHashMap<String, ConcurrentHashMap<String, Handler>> handlers = new ConcurrentHashMap<>();
     final List validPaths = List.of("/index.html", "/spring.svg", "/spring.png", "/resources.html", "/styles.css", "/app.js", "/links.html", "/forms.html", "/classic.html", "/events.html", "/events.js");
     private ExecutorService thread;
 
@@ -45,23 +47,47 @@ public class Server {
         }
     }
 
+    public void addHandler(String method, String path, Handler handler) {
+        if (!handlers.containsKey(method)) {
+            handlers.put(method, new ConcurrentHashMap<>());
+        }
+        handlers.get(method).put(path, handler);
+    }
+
     public void response(String[] parts, BufferedOutputStream out) throws IOException {
+        final var method = parts[0];
         final var path = parts[1];
-        if (!validPaths.contains(path)) {
-            out.write((
-                    "HTTP/1.1 404 Not Found\r\n" +
-                            "Content-Length: 0\r\n" +
-                            "Connection: close\r\n" +
-                            "\r\n"
-            ).getBytes());
-            out.flush();
+
+        Request request;
+        if (method != null) {
+            request = new Request(method, path);
+        } else {
+            notFound(out);
+            return;
+        }
+        if (!handlers.containsKey(request.getMethod())) {
+            notFound(out);
             return;
         }
 
+        ConcurrentHashMap<String, Handler> hMap = handlers.get(request.getMethod());
+        String reqPath = request.getPath();
+        if (hMap.containsKey(reqPath)) {
+            Handler handler = hMap.get(reqPath);
+            handler.handle(request, out);
+        } else {
+            if (!validPaths.contains(request.getPath())) {
+                notFound(out);
+            } else {
+                normalResponse(out, path);
+            }
+        }
+    }
+
+    void normalResponse(BufferedOutputStream out, String path) throws IOException {
         final var filePath = Path.of(".", "public", path);
         final var mimeType = Files.probeContentType(filePath);
 
-        // special case for classic
         if (path.equals("/classic.html")) {
             final var template = Files.readString(filePath);
             final var content = template.replace(
@@ -92,4 +118,18 @@ public class Server {
         out.flush();
     }
 
+    public void notFound(BufferedOutputStream out) {
+        try {
+            out.write((
+                    "HTTP/1.1 400 Not Found\r\n" +
+                            "Content-Length: 0\r\n" +
+                            "Connection: close\r\n" +
+                            "\r\n"
+            ).getBytes());
+            out.flush();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
 }
