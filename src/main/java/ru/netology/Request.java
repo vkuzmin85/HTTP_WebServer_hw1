@@ -5,12 +5,15 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
+import java.net.URLDecoder;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.util.stream.Collectors;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
+
+import static java.nio.charset.StandardCharsets.*;
 
 public class Request {
     public static final String GET = "GET";
@@ -18,29 +21,30 @@ public class Request {
     private String path;
     private String method;
     private List<String> headers;
-    private List<NameValuePair> queryParams;
+    private static List<NameValuePair> queryParams;
+    private static List<NameValuePair> postParams;
     private String protocolVersion;
     private String body;
-
-    private Request() {
-    }
 
     private Request(String method, String path) {
         this.method = method;
         this.path = path;
     }
 
-    private Request(String method, String path, String protocolVersion, List<String> headers, String body, List<NameValuePair> queryParams) {
+    private Request(String method, String path, String protocolVersion, List<String> headers, String body, List<NameValuePair> queryParams, List<NameValuePair> postParams) {
         this.method = method;
         this.path = path;
         this.protocolVersion = protocolVersion;
         this.headers = headers;
         this.body = body;
         this.queryParams = queryParams;
+        this.postParams = postParams;
         printRequest();
     }
 
     public static Request makeRequest(BufferedInputStream in) throws IOException, URISyntaxException {
+        List<NameValuePair> qParams = null;
+        List<NameValuePair> pParams = null;
         final var allowedMethods = List.of(GET, POST);
 
         // лимит на request line + заголовки
@@ -74,7 +78,7 @@ public class Request {
             return null;
         }
         final var protocolVersion = requestLine[2];
-        List<NameValuePair> queryParams = URLEncodedUtils.parse(new URI(path), String.valueOf(StandardCharsets.UTF_8));
+        qParams = URLEncodedUtils.parse(URI.create(path), String.valueOf(UTF_8));
 
         // ищем заголовки
         final var headersDelimiter = new byte[]{'\r', '\n', '\r', '\n'};
@@ -94,7 +98,7 @@ public class Request {
         System.out.println(headers);
 
         // для GET тела нет
-        String body = null;
+        var bodyText="";
         if (!method.equals(GET)) {
             in.skip(headersDelimiter.length);
             // вычитываем Content-Length, чтобы прочитать body
@@ -102,22 +106,35 @@ public class Request {
             if (contentLength.isPresent()) {
                 final var length = Integer.parseInt(contentLength.get());
                 final var bodyBytes = in.readNBytes(length);
-
-                body = new String(bodyBytes);
-                System.out.println(body);
+                bodyText = new String(bodyBytes);
+                if(isContentOfType(headers, "x-www-form-urlencoded")){
+                    pParams = URLEncodedUtils.parse(bodyText, Charset.defaultCharset());
+                    pParams.stream().forEach(System.out::println);
+                }
             }
         }
-        return new Request(method, path, protocolVersion, headers, body, queryParams);
+        return new Request(method, path, protocolVersion, headers, bodyText, qParams, pParams);
+    }
+
+
+    private static Boolean isContentOfType(List<String> headers, String header) {
+        for (String s: headers) {
+            if(s.contains(header)){
+                return  true;
+            }
+        }
+        return false;
     }
 
     private void printRequest() {
         System.out.println("method: " + method);
         System.out.println("path: " + path);
-        System.out.println("protocolVersion " + protocolVersion);
-        System.out.println("headers " + headers);
-        System.out.println("body " + body);
-        System.out.println("queryParams: " + getPostParam());
-        System.out.println("userID" + ":  " + getPostParam("userID"));
+        System.out.println("protocolVersion: " + protocolVersion);
+        System.out.println("headers: " + headers);
+        System.out.println("body: " + body);
+        System.out.println("queryParams: " + getQueryParams());
+        System.out.println("userID:  " + getQueryParam("userID"));
+        System.out.println("postParams:  " + getPostParams().toString());
     }
 
     private static Optional<String> extractHeader(List<String> headers, String header) {
@@ -152,12 +169,22 @@ public class Request {
         return -1;
     }
 
-    public List<NameValuePair> getPostParam() {
+    public List<NameValuePair> getQueryParams() {
         return queryParams;
     }
 
-    public List<NameValuePair> getPostParam(String name) {
+    public List<NameValuePair> getQueryParam(String name) {
         return queryParams.stream()
+                .filter(str -> Objects.equals(str.getName(), name))
+                .collect(Collectors.toList());
+    }
+
+    public List<NameValuePair> getPostParams() {
+        return postParams;
+    }
+
+    public List<NameValuePair> getPostParam(String name) {
+        return postParams.stream()
                 .filter(str -> Objects.equals(str.getName(), name))
                 .collect(Collectors.toList());
     }
