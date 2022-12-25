@@ -1,11 +1,9 @@
 package ru.netology;
 
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -24,26 +22,16 @@ public class Server {
             thread = Executors.newFixedThreadPool(64);
             while (true) {
                 final Socket socket = serverSocket.accept();
-                thread.submit(() -> request(socket));
+                thread.submit(() -> {
+                    try {
+                        response(socket);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
             }
         } catch (IOException ex) {
             ex.printStackTrace();
-        }
-    }
-
-    public void request(Socket socket) {
-        try {
-            final var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            final var out = new BufferedOutputStream(socket.getOutputStream());
-            final var requestLine = in.readLine();
-            final var parts = requestLine.split(" ");
-            if (parts.length != 3) {
-                socket.close();
-            } else {
-                response(parts, out);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -54,22 +42,20 @@ public class Server {
         handlers.get(method).put(path, handler);
     }
 
-    public void response(String[] parts, BufferedOutputStream out) throws IOException {
-        final var method = parts[0];
-        final var path = parts[1];
+    public void response(Socket socket) throws IOException {
+        final var in = new BufferedInputStream(socket.getInputStream());
+        final var out = new BufferedOutputStream(socket.getOutputStream());
+        Request request = null;
+        try {
+            request = Request.makeRequest(in);
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
+        }
 
-        Request request;
-        if (method != null) {
-            request = new Request(method, path);
-        } else {
+        if (request == null && !handlers.containsKey(request.getMethod())) {
             notFound(out);
             return;
         }
-        if (!handlers.containsKey(request.getMethod())) {
-            notFound(out);
-            return;
-        }
-
         ConcurrentHashMap<String, Handler> hMap = handlers.get(request.getMethod());
         String reqPath = request.getPath();
         if (hMap.containsKey(reqPath)) {
@@ -79,7 +65,7 @@ public class Server {
             if (!validPaths.contains(request.getPath())) {
                 notFound(out);
             } else {
-                normalResponse(out, path);
+                normalResponse(out, request.getPath());
             }
         }
     }
