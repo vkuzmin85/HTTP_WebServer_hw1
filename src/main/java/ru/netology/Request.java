@@ -6,10 +6,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import org.apache.http.NameValuePair;
@@ -119,7 +116,8 @@ public class Request {
         System.out.println("protocolVersion " + protocolVersion);
         System.out.println("headers " + headers);
         System.out.println("body " + body);
-        System.out.println("queryParams " + queryParams);
+        System.out.println("queryParams: " + getPostParam());
+        System.out.println("userID" + ":  " + getPostParam("userID"));
     }
 
     private static Optional<String> extractHeader(List<String> headers, String header) {
@@ -154,11 +152,11 @@ public class Request {
         return -1;
     }
 
-    public List<NameValuePair> getQueryParam() {
+    public List<NameValuePair> getPostParam() {
         return queryParams;
     }
 
-    public List<NameValuePair> getQueryParam(String name) {
+    public List<NameValuePair> getPostParam(String name) {
         return queryParams.stream()
                 .filter(str -> Objects.equals(str.getName(), name))
                 .collect(Collectors.toList());
